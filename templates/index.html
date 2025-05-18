@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Moniteur d'Utilisation CPU</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .cpu-usage-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .cpu-usage-card {
+            background: #f5f5f5;
+            border-radius: 10px;
+            padding: 15px;
+            min-width: 150px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .cpu-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .cpu-usage {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Moniteur d'Utilisation CPU</h1>
+        <div class="cpu-usage-container" id="cpuContainer">
+            <!-- Les indicateurs d'utilisation CPU seront ajoutés ici dynamiquement -->
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="cpuChart"></canvas>
+    </div>
+
+
+
+    <script>
+        // Configuration du graphique
+        const maxDataPoints = 50;
+        let cpuChart = null;
+        let autoRefresh = true;
+        let updateInterval;
+        let timeLabels = [];
+        let cpuData = {};
+        
+        // Couleurs pour chaque CPU
+        const cpuColors = [
+            'rgba(75, 192, 192, 1)',   // Vert
+            'rgba(54, 162, 235, 1)',   // Bleu
+            'rgba(255, 99, 132, 1)',    // Rouge
+            'rgba(255, 159, 64, 1)',    // Orange
+            'rgba(153, 102, 255, 1)',   // Violet
+            'rgba(255, 205, 86, 1)',    // Jaune
+            'rgba(201, 203, 207, 1)',   // Gris
+            'rgba(255, 0, 0, 1)',       // Rouge vif
+            'rgba(0, 255, 0, 1)',       // Vert vif
+            'rgba(0, 0, 255, 1)',       // Bleu vif
+            'rgba(255, 0, 255, 1)',     // Magenta
+            'rgba(0, 255, 255, 1)'      // Cyan
+        ];
+
+        // Détruire le graphique existant
+        function destroyChart() {
+            if (cpuChart) {
+                try {
+                    cpuChart.destroy();
+                } catch (e) {
+                    console.error('Erreur lors de la destruction du graphique:', e);
+                }
+                cpuChart = null;
+            }
+            cpuData = {};
+        }
+
+        // Initialisation du graphique
+        function initChart(cpuNames) {
+
+            const container = document.getElementById('cpuContainer');
+            if (!container) {
+                console.error('Conteneur CPU non trouvé');
+                return;
+            }
+            
+            // Détruire le graphique existant
+            destroyChart();
+            
+            // Vérifier si nous avons des noms de CPU valides
+            if (!cpuNames || !Array.isArray(cpuNames) || cpuNames.length === 0) {
+                const errorMsg = 'Aucun nom de CPU valide fourni';
+                console.error(errorMsg, cpuNames);
+                container.innerHTML = `<div style="color: #e15759; text-align: center; width: 100%; padding: 20px;">${errorMsg}</div>`;
+                return;
+            }
+            
+            // Mettre à jour l'affichage des indicateurs CPU
+            container.innerHTML = cpuNames.map(cpuName => `
+                <div class="cpu-usage-card">
+                    <div class="cpu-name">${cpuName}</div>
+                    <div class="cpu-usage" id="${cpuName}Value">0%</div>
+                </div>
+            `).join('');
+            
+            // Initialiser le graphique principal
+            const ctx = document.getElementById('cpuChart').getContext('2d');
+            if (!ctx) {
+                console.error('Contexte de canvas non disponible');
+                return;
+            }
+            
+            // Préparer les datasets pour chaque CPU
+            const datasets = cpuNames.map((cpuName, index) => ({
+                label: cpuName,
+                data: [],
+                borderColor: cpuColors[index % cpuColors.length],
+                backgroundColor: cpuColors[index % cpuColors.length].replace('1)', '0.2)'),
+                borderWidth: 2,
+                pointRadius: 2,
+                fill: false,
+                tension: 0.1
+            }));
+            
+            // Créer le graphique
+            cpuChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 0
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'Utilisation CPU (%)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Temps'
+                            }
+                        }
+                    },
+                    plugins: {
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x'
+                            }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+
+            // Initialiser les données pour chaque CPU
+            cpuNames.forEach(cpuName => {
+                cpuData[cpuName] = [];
+            });
+        }
+
+
+        // Mettre à jour le graphique avec de nouvelles données
+        function updateCharts(data) {
+
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            
+            // Vérifier la structure des données
+            if (!data || !data.cpus || !Array.isArray(data.cpus)) {
+                console.error('Format de données invalide:', data);
+                return;
+            }
+            
+
+            
+            // Mettre à jour les étiquettes de temps
+            timeLabels.push(timeString);
+            if (timeLabels.length > maxDataPoints) {
+                timeLabels.shift();
+            }
+            
+            // Vérifier que data.cpus existe et est un tableau
+            if (!data || !data.cpus || !Array.isArray(data.cpus)) {
+                console.error('Format de données invalide:', data);
+                return;
+            }
+
+            // Mettre à jour les données de chaque CPU
+            data.cpus.forEach((cpu, index) => {
+
+                const cpuName = cpu.cpu; // Clé en minuscules comme défini dans le JSON
+                const usage = Math.round(cpu.usage * 10) / 10; // Clé en minuscules comme défini dans le JSON
+                
+                // Mettre à jour la valeur affichée
+                const valueElement = document.getElementById(`${cpuName}Value`);
+                if (valueElement) {
+                    valueElement.textContent = `${usage}%`;
+                    // Changer la couleur en fonction de l'utilisation
+                    valueElement.style.color = getUsageColor(usage);
+                }
+                
+                // Mettre à jour les données du graphique
+                if (!cpuData[cpuName]) {
+                    cpuData[cpuName] = [];
+                }
+                
+                cpuData[cpuName].push(usage);
+                if (cpuData[cpuName].length > maxDataPoints) {
+                    cpuData[cpuName].shift();
+                }
+            });
+            
+            // Mettre à jour le graphique principal
+            if (cpuChart) {
+                // Mettre à jour les labels
+                cpuChart.data.labels = [...timeLabels];
+                
+                // Mettre à jour les données de chaque dataset
+                data.cpus.forEach((cpu, index) => {
+                    const cpuName = cpu.cpu; // Clé en minuscules comme défini dans le JSON
+                    if (cpuChart.data.datasets[index]) {
+                        cpuChart.data.datasets[index].data = [...(cpuData[cpuName] || [])];
+                    }
+                });
+                
+                // Mettre à jour le graphique
+                cpuChart.update('none');
+            }
+        }
+
+        // Obtenir une couleur en fonction de l'utilisation
+        function getUsageColor(usage) {
+            if (usage > 80) return '#e15759'; // Rouge pour utilisation élevée
+            if (usage > 60) return '#f28e2b'; // Orange pour utilisation moyenne
+            return '#59a14f'; // Vert pour utilisation basse
+        }
+
+        // Réinitialiser le graphique
+        function resetCharts() {
+            // Arrêter la mise à jour automatique
+            stopAutoRefresh();
+            
+            // Réinitialiser les données
+            timeLabels = [];
+            cpuData = {};
+            
+            // Recréer le graphique
+            if (cpuChart && cpuChart.data.datasets) {
+                const cpuNames = cpuChart.data.datasets.map(ds => ds.label);
+                destroyChart();
+                if (cpuNames.length > 0) {
+                    initChart(cpuNames);
+                }
+            }
+            
+            // Redémarrer la mise à jour automatique
+            startAutoRefresh();
+        }
+
+        // Basculer la mise à jour automatique
+        function toggleAutoRefresh() {
+            autoRefresh = !autoRefresh;
+            const btn = document.getElementById('toggleBtn');
+            
+            if (autoRefresh) {
+                btn.textContent = 'Désactiver la mise à jour automatique';
+                startAutoRefresh();
+            } else {
+                btn.textContent = 'Activer la mise à jour automatique';
+                stopAutoRefresh();
+            }
+        }
+
+        // Démarrer la mise à jour automatique
+        function startAutoRefresh() {
+            updateInterval = setInterval(updateCPUUsage, 1000); // Mise à jour toutes les secondes
+        }
+
+        // Arrêter la mise à jour automatique
+        function stopAutoRefresh() {
+            clearInterval(updateInterval);
+        }
+
+        // Mettre à jour l'utilisation du CPU
+        function updateCPUUsage() {
+            fetch('/cpu-usage')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Erreur réseau');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.cpus && Array.isArray(data.cpus)) {
+                        // Si c'est la première mise à jour, initialiser le graphique
+                        if (!cpuChart) {
+                            const cpuNames = data.cpus.map(cpu => cpu.cpu);
+                            initChart(cpuNames);
+                        }
+                        updateCharts(data);
+                    } else {
+                        throw new Error('Format de données invalide');
+                    }
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    // Afficher un message d'erreur
+                    const container = document.getElementById('cpuContainer');
+                    if (container) {
+                        container.innerHTML = `
+                            <div style="color: #e15759; text-align: center; width: 100%; padding: 20px;">
+                                Erreur de chargement des données CPU: ${error.message}
+                            </div>`;
+                    }
+                });
+        }
+
+        // Initialiser l'application au chargement de la page
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM chargé, initialisation...');
+            // Initialiser les variables globales si nécessaire
+            if (!window.cpuData) window.cpuData = {};
+            if (!window.timeLabels) window.timeLabels = [];
+            
+            startAutoRefresh();
+            // Première mise à jour immédiate
+            updateCPUUsage();
+        });
+    </script>
+</body>
+</html>
