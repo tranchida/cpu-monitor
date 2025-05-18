@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -24,6 +25,32 @@ type CPUUsage struct {
 	CPU       string  `json:"cpu"`
 	Usage     float64 `json:"usage"`
 	Timestamp int64   `json:"timestamp"`
+}
+
+// Cache pour stocker les données CPU
+type CPUCache struct {
+	data  []CPUUsage
+	mutex sync.RWMutex
+}
+
+// Instance globale du cache
+var cpuCache = &CPUCache{}
+
+// Mettre à jour le cache avec les nouvelles données CPU
+func (c *CPUCache) update(usage []CPUUsage) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.data = usage
+}
+
+// Obtenir les données du cache
+func (c *CPUCache) getData() []CPUUsage {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	// Créer une copie des données pour éviter les problèmes de concurrence
+	result := make([]CPUUsage, len(c.data))
+	copy(result, c.data)
+	return result
 }
 
 func getCPUUsage() ([]CPUUsage, error) {
@@ -58,12 +85,22 @@ func getCPUUsage() ([]CPUUsage, error) {
 	return usage, nil
 }
 
-// Handler pour l'utilisation du CPU
-func getCPUUsageHandler(c echo.Context) error {
-	usage, err := getCPUUsage()
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+// Fonction qui s'exécute dans un thread séparé pour mettre à jour le cache
+func cpuMonitoringWorker(interval time.Duration) {
+	for {
+		usage, err := getCPUUsage()
+		if err == nil {
+			cpuCache.update(usage)
+		} else {
+			fmt.Printf("Erreur lors de la collecte des données CPU: %v\n", err)
+		}
+		time.Sleep(interval)
 	}
+}
+
+// Handler pour l'utilisation du CPU (renvoie les données du cache)
+func getCPUUsageHandler(c echo.Context) error {
+	usage := cpuCache.getData()
 	// Renvoyer un objet avec une propriété cpus pour correspondre à ce que le frontend attend
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"cpus": usage,
@@ -76,6 +113,9 @@ func main() {
 	// Middleware
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
+
+	// Démarrer le thread de surveillance CPU
+	go cpuMonitoringWorker(1 * time.Second)
 
 	// Templates
 	t := &Template{
